@@ -13,7 +13,7 @@ Enable this plugin in the context of OIDC and AI Proxy plugins. It gets the cook
 Those plugins are executed in this order during the request processing.
 1) Add `openid-connect` plugin: set the `config.session_cookie_name`
 2) Add `cookie-management` plugin. The process is:
-  - In `header_filter` phase, get the cookie value from the HTTP rersponse `set-cookie` header
+  - In `header_filter` phase, get the cookie value from the HTTP response `set-cookie` header
   - Put the value in `kong.ctx.name_of_your_cookie`
 3) Add `post-function` plugin and put the following code in the `header_filter` phase:
 ```lua
