@@ -15,13 +15,13 @@ function CookieManagement:header_filter(conf)
         local b,_=string.find(v, conf.cookie_name .. "=")
         if b then
           kong.ctx.shared[conf.cookie_name] =v
-          kong.log.notice("set-cookie: '", conf.cookie_name, "' is found")
+          kong.log.debug("set-cookie: '", conf.cookie_name, "' is found")
           break
         end
     end
   end
   if not kong.ctx.shared[conf.cookie_name] then
-    kong.log.notice("set-cookie: '", conf.cookie_name, "' is NOT found")
+    kong.log.debug("set-cookie: '", conf.cookie_name, "' is NOT found")
   end
 
 end
