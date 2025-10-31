@@ -1,0 +1,88 @@
+####
+# http --proxy=http:http://myuser:mypassword@proxy.client.com:3128 http://kong-cp-standalone3:9000/webhook
+###
+
+volumes:
+  kong_db_data3: {}  # Named volume to persist Postgres data across container restarts
+
+networks:
+  kong-ee-net:      # Custom bridge network for isolated Kong and Postgres communication
+    driver: bridge
+
+# Common environment variables used by Kong services (bootstrap and CP)
+x-kong-config: &kong-env
+  KONG_DATABASE: postgres             # Use Postgres as the backing database
+  KONG_PG_HOST: kong-ee-database-standalone3      # Hostname of the Postgres service
+  KONG_PG_DATABASE: kong              # Name of the database to connect to
+  KONG_PG_USER: kong                  # Database username
+  KONG_PG_PASSWORD: kong              # Database password
+  KONG_LICENSE_DATA: "${KONG_LICENSE_DATA}"
+
+services:
+
+  kong-ee-database-standalone3:
+    container_name: kong-ee-database-standalone3
+    image: postgres:latest           # Official Postgres image
+    restart: on-failure              # Restart if the container fails
+    volumes:
+      - kong_db_data3:/var/lib/postgresql/data  # Mount the volume for persistent data
+    networks:
+      - kong-ee-net                  # Connect to the shared Kong network
+    environment:
+      POSTGRES_USER: kong            # Set DB user inside the container
+      POSTGRES_DB: kong              # Create this database on first run
+      POSTGRES_PASSWORD: kong        # Set the password for the DB user
+    healthcheck:                     # Ensure the DB is ready before starting dependent services
+      test: ["CMD", "pg_isready", "-U", "kong"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+    ports:
+      - '5432:5432'                  # Optional: expose Postgres on localhost for debugging
+
+  kong-bootstrap-standalone3:
+    #image: '${GW_IMAGE:-kong/kong-gateway:3.9.1.0}'  # Kong Gateway image (default to latest version)
+    image: '${GW_IMAGE:-kong/kong-gateway:3.12.0.0}'
+    container_name: kong-bootstrap-standalone3
+    networks:
+      - kong-ee-net
+    depends_on:
+      kong-ee-database-standalone3:
+        condition: service_healthy   # Wait until Postgres is up and healthy
+    restart: on-failure
+    environment:
+      <<: *kong-env                 # Reuse environment config from x-kong-config
+      KONG_PASSWORD: handyshake    # Admin GUI password (required for RBAC)
+    command: kong migrations bootstrap  # Run DB migrations to initialize Kong schema
+    #command: kong migrations up  # Run DB migrations to initialize Kong schema
+
+  kong-cp-standalone3:
+    image: '${GW_IMAGE:-kong/kong-gateway:3.12.0.0}'  # Main Kong Gateway Control Plane (default to latest version)
+    #image: '${GW_IMAGE:-kong/kong-gateway:3.9.1.0}'  # Main Kong Gateway Control Plane (default to latest version)
+    container_name: kong-cp-standalone3
+    hostname: kong-cp-standalone3
+    restart: on-failure
+    networks:
+      - kong-ee-net
+    volumes:
+      - ${PROJECT_DIR}/kong/plugins/cookie-management:/usr/local/share/lua/5.1/kong/plugins/cookie-management
+    environment:
+      <<: *kong-env
+      KONG_PROXY_LISTEN: 0.0.0.0:9000, 0.0.0.0:9443 ssl
+      KONG_ADMIN_LISTEN: 0.0.0.0:9001, 0.0.0.0:9444 ssl  # Admin API on HTTP + HTTPS
+      KONG_ADMIN_GUI_LISTEN: 0.0.0.0:9002, 0.0.0.0:9445 ssl  # Kong Manager on HTTP + HTTPS
+      KONG_ADMIN_GUI_URL: http://${GW_HOST:-localhost}:9002  # URL for GUI links
+      KONG_PASSWORD: handyshake  # Required for logging in to Kong Manager (RBAC)
+      KONG_PLUGINS: bundled,cookie-management  # Load the custom cookie-management plugin along with bundled plugins
+      KONG_NGINX_WORKER_PROCESSES: 1
+
+    depends_on:
+      kong-bootstrap-standalone3:
+        condition: service_completed_successfully  # Start only after bootstrap has succeeded
+    ports:
+      - "9000:9000"  # Proxy HTTP
+      - "9443:9443"  # Proxy HTTPS
+      - "9001:9001"  # Admin API HTTP
+      - "9444:9444"  # Admin API HTTPS
+      - "9002:9002"  # Kong Manager HTTP
+      - "9445:9445"  # Kong Manager HTTPS
